@@ -1,7 +1,13 @@
-from flask import current_app
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
+from flask import current_app
 from typing import List, Optional
+
+def configure_sendinblue():
+    """Initialize Sendinblue (Brevo) with API key."""
+    configuration = sib_api_v3_sdk.Configuration()
+    configuration.api_key['api-key'] = current_app.config['SENDINBLUE_API_KEY']
+    return sib_api_v3_sdk.ApiClient(configuration)
 
 def send_email(
     to_email: str,
@@ -14,11 +20,11 @@ def send_email(
     Send an email using Sendinblue (Brevo).
     
     Args:
-        to_email (str): Recipient email address
-        subject (str): Email subject
-        content (str): Plain text content
-        html_content (str, optional): HTML content. If not provided, plain text will be used
-        from_email (str, optional): Sender email. If not provided, default sender will be used
+        to_email: Recipient email address
+        subject: Email subject
+        content: Plain text content
+        html_content: HTML content (optional)
+        from_email: Sender email (optional)
     
     Returns:
         bool: True if email was sent successfully, False otherwise
@@ -62,8 +68,8 @@ def send_verification_email(user_email: str, token: str) -> bool:
     Send a verification email to a user.
     
     Args:
-        user_email (str): User's email address
-        token (str): Verification token
+        user_email: User's email address
+        token: Verification token
     
     Returns:
         bool: True if email was sent successfully, False otherwise
@@ -86,8 +92,8 @@ def send_password_reset_email(user_email: str, token: str) -> bool:
     Send a password reset email to a user.
     
     Args:
-        user_email (str): User's email address
-        token (str): Password reset token
+        user_email: User's email address
+        token: Password reset token
     
     Returns:
         bool: True if email was sent successfully, False otherwise
@@ -116,11 +122,11 @@ def send_booking_confirmation_email(
     Send a booking confirmation email.
     
     Args:
-        user_email (str): User's email address
-        space_name (str): Name of the booked space
-        start_date (str): Booking start date
-        end_date (str): Booking end date
-        total_price (float): Total booking price
+        user_email: User's email address
+        space_name: Name of the booked space
+        start_date: Booking start date
+        end_date: Booking end date
+        total_price: Total booking price
     
     Returns:
         bool: True if email was sent successfully, False otherwise

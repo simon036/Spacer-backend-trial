@@ -1,12 +1,13 @@
 import cloudinary
 import cloudinary.uploader
-from flask import current_app
-from typing import Dict, Optional, Tuple
+import cloudinary.api
 from PIL import Image
 import io
 import base64
+from flask import current_app
+from typing import Dict, Optional, Tuple
 
-def init_cloudinary():
+def configure_cloudinary():
     """Initialize Cloudinary with credentials from config."""
     cloudinary.config(
         cloud_name=current_app.config['CLOUDINARY_CLOUD_NAME'],
@@ -14,119 +15,103 @@ def init_cloudinary():
         api_secret=current_app.config['CLOUDINARY_API_SECRET']
     )
 
-def resize_image(image_data: bytes, max_size: Tuple[int, int] = (800, 800)) -> bytes:
+def resize_image(image_data: str, max_width: int = 800, max_height: int = 600) -> bytes:
     """
-    Resize an image while maintaining aspect ratio.
+    Resize image before upload to optimize storage and performance.
     
     Args:
-        image_data (bytes): Raw image data
-        max_size (tuple): Maximum width and height
-    
+        image_data: Base64 encoded image data
+        max_width: Maximum width in pixels
+        max_height: Maximum height in pixels
+        
     Returns:
-        bytes: Resized image data
-    """
-    img = Image.open(io.BytesIO(image_data))
-    img.thumbnail(max_size, Image.LANCZOS)
-    
-    # Convert back to bytes
-    output = io.BytesIO()
-    img.save(output, format=img.format or 'JPEG')
-    return output.getvalue()
-
-def upload_image(
-    image_data: bytes,
-    folder: str = "spaces",
-    public_id: Optional[str] = None,
-    tags: Optional[list] = None
-) -> Dict:
-    """
-    Upload an image to Cloudinary.
-    
-    Args:
-        image_data (bytes): Raw image data
-        folder (str): Cloudinary folder to store the image
-        public_id (str, optional): Custom public ID for the image
-        tags (list, optional): List of tags for the image
-    
-    Returns:
-        dict: Cloudinary upload response
+        Resized image as bytes
     """
     try:
-        # Initialize Cloudinary
-        init_cloudinary()
+        # Decode base64 image
+        image_bytes = base64.b64decode(image_data)
+        image = Image.open(io.BytesIO(image_bytes))
         
+        # Calculate new dimensions while maintaining aspect ratio
+        width, height = image.size
+        if width > max_width or height > max_height:
+            ratio = min(max_width/width, max_height/height)
+            new_size = (int(width * ratio), int(height * ratio))
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+        
+        # Convert to JPEG and save to bytes
+        output = io.BytesIO()
+        image.save(output, format='JPEG', quality=85)
+        return output.getvalue()
+    except Exception as e:
+        current_app.logger.error(f"Error resizing image: {str(e)}")
+        raise
+
+def upload_image(image_data: str, folder: str = 'spaces', public_id: Optional[str] = None) -> str:
+    """
+    Upload image to Cloudinary with resizing.
+    
+    Args:
+        image_data: Base64 encoded image data
+        folder: Cloudinary folder to store the image
+        public_id: Optional public ID for the image
+        
+    Returns:
+        Secure URL of the uploaded image
+    """
+    configure_cloudinary()
+    
+    try:
         # Resize image before upload
         resized_image = resize_image(image_data)
         
-        # Convert to base64
-        base64_image = base64.b64encode(resized_image).decode('utf-8')
-        
         # Upload to Cloudinary
-        upload_params = {
-            "folder": folder,
-            "resource_type": "image",
-            "tags": tags
-        }
-        
-        if public_id:
-            upload_params["public_id"] = public_id
-            
-        response = cloudinary.uploader.upload(
-            f"data:image/jpeg;base64,{base64_image}",
-            **upload_params
+        upload_result = cloudinary.uploader.upload(
+            resized_image,
+            folder=folder,
+            public_id=public_id,
+            resource_type='image',
+            format='jpg'
         )
         
-        return {
-            "url": response["secure_url"],
-            "public_id": response["public_id"],
-            "format": response["format"],
-            "width": response["width"],
-            "height": response["height"]
-        }
+        return upload_result['secure_url']
     except Exception as e:
-        current_app.logger.error(f"Failed to upload image to Cloudinary: {str(e)}")
+        current_app.logger.error(f"Error uploading image to Cloudinary: {str(e)}")
         raise
 
-def delete_image(public_id: str) -> bool:
+def delete_image(public_id: str) -> Dict:
     """
-    Delete an image from Cloudinary.
+    Delete image from Cloudinary.
     
     Args:
-        public_id (str): Public ID of the image to delete
-    
-    Returns:
-        bool: True if deletion was successful, False otherwise
-    """
-    try:
-        # Initialize Cloudinary
-        init_cloudinary()
+        public_id: Cloudinary public ID of the image
         
-        response = cloudinary.uploader.destroy(public_id)
-        return response["result"] == "ok"
-    except Exception as e:
-        current_app.logger.error(f"Failed to delete image from Cloudinary: {str(e)}")
-        return False
-
-def generate_transformation_url(url: str, width: int = 800, height: int = 800, crop: str = 'fill') -> str:
+    Returns:
+        Cloudinary deletion result
     """
-    Generate a Cloudinary URL with transformations.
+    configure_cloudinary()
+    
+    try:
+        return cloudinary.uploader.destroy(public_id)
+    except Exception as e:
+        current_app.logger.error(f"Error deleting image from Cloudinary: {str(e)}")
+        raise
+
+def get_image_url(public_id: str, transformations: Optional[Dict] = None) -> str:
+    """
+    Get Cloudinary URL with optional transformations.
     
     Args:
-        url (str): Original Cloudinary URL
-        width (int): Desired width
-        height (int): Desired height
-        crop (str): Crop mode ('fill', 'fit', 'crop', etc.)
-    
+        public_id: Cloudinary public ID of the image
+        transformations: Optional transformation parameters
+        
     Returns:
-        str: Transformed URL
+        Transformed image URL
     """
+    configure_cloudinary()
+    
     try:
-        # Split URL to insert transformation
-        parts = url.split('/upload/')
-        if len(parts) != 2:
-            return url
-            
-        transform = f"w_{width},h_{height},c_{crop}"
-        return f"{parts[0]}/upload/{transform}/{parts[1]}"
-    except Exception:
-        return url 
+        return cloudinary.CloudinaryImage(public_id).build_url(transformation=transformations)
+    except Exception as e:
+        current_app.logger.error(f"Error generating image URL: {str(e)}")
+        raise 
